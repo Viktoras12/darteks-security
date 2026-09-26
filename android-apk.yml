@@ -1,0 +1,50 @@
+name: Build Darteks Android APK
+on:
+  workflow_dispatch:
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.1
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Download exact source snapshot
+        run: |
+          curl -fLsS --retry 3 --max-time 180 'https://3cd01b35-9a61-45b9-9f00-aabf53774fc3-00-1yitven8laacm.expo.riker.replit.dev/Darteks-Android-source.zip' -o source.zip
+          echo 'dc677a6720cbf7350529018fee772abc227051e53ba41582a9a99d404a2f78a9  source.zip' | sha256sum -c -
+          mkdir project && unzip -q source.zip -d project
+      - name: Install locked dependencies
+        working-directory: project
+        run: pnpm install --frozen-lockfile
+      - name: Load public production app configuration
+        working-directory: project/artifacts/darteks-security
+        run: |
+          node -e "const fs=require('fs');const env=require('./eas.json').build.prodtest.env;fs.appendFileSync(process.env.GITHUB_ENV,Object.entries(env).map(([key,value])=>key+'='+value+String.fromCharCode(10)).join(''))"
+      - name: Check Expo package compatibility
+        working-directory: project/artifacts/darteks-security
+        run: CI=1 pnpm exec expo install --check
+      - name: Generate Android native project
+        working-directory: project/artifacts/darteks-security
+        run: CI=1 pnpm exec expo prebuild --platform android --non-interactive
+      - name: Build release APK
+        working-directory: project/artifacts/darteks-security/android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Darteks-Security-5.1.13-171-apk
+          path: project/artifacts/darteks-security/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
